@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.eggs/
+.eggs/
+
+# Environment
+.env
+.venv/
+env/
+
+# Models (large binary files)
+models/*.pt
+models/*.onnx
+
+# Data
+data/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Calibration data (machine-specific)
+calibration/*.json
+
+# Generated protocols
+protocols/*.py
+
+# Jupyter
+.ipynb_checkpoints/
