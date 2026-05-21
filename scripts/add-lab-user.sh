@@ -111,8 +111,20 @@ if ! command -v claude >/dev/null; then
 fi
 grep -q '.npm-global/bin' ~/.bashrc || \
     echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> ~/.bashrc
+# Auto-export ANTHROPIC_API_KEY from the shared lab .env so Claude Code
+# uses API-key billing without a login flow.
+if ! grep -q 'ot2-vision/.env loader' ~/.bashrc; then
+    cat >> ~/.bashrc <<'BASHRC'
+
+# ot2-vision/.env loader — exports ANTHROPIC_API_KEY for Claude Code
+if [ -r /opt/ot2-vision/.env ]; then
+    export ANTHROPIC_API_KEY="$(grep -E '^ANTHROPIC_API_KEY=' /opt/ot2-vision/.env | cut -d= -f2-)"
+fi
+BASHRC
+fi
 EOSU
 echo "Installed Claude Code in $HOME_DIR/.npm-global"
+echo "Configured ~$USERNAME/.bashrc to auto-export ANTHROPIC_API_KEY from $SHARED_REPO/.env"
 
 # ---- 7. symlink shared repo into their home ----
 sudo -u "$USERNAME" ln -snf "$SHARED_REPO" "$HOME_DIR/ot2-vision"
@@ -129,14 +141,13 @@ Tell them:
   2. Open a fresh shell so the PATH update + group changes apply
      (or run:  newgrp $LAB_GROUP  then re-source ~/.bashrc).
   3. Verify Claude Code:    claude --version
-  4. cd ~/ot2-vision        # symlink to the shared repo
-  5. Read ~/ot2-vision/CLAUDE.md for the mandatory pre-run safety checks.
-  6. Authenticate Claude Code with the lab API key (one-time):
-        export ANTHROPIC_API_KEY=\$(grep ^ANTHROPIC_API_KEY \\
-            ~/ot2-vision/.env | cut -d= -f2-)
-     Or use:  claude config set api-key <key>
+  4. Verify API key auto-loads:  echo \${ANTHROPIC_API_KEY:0:12}
+     (should print 'sk-ant-api03' — set by ~/.bashrc on shell start)
+  5. cd ~/ot2-vision        # symlink to the shared repo
+  6. Read ~/ot2-vision/CLAUDE.md for the mandatory pre-run safety checks.
 
 Lab API key + camera + OT-2 IP all live in $SHARED_REPO/.env
 (mode 640, group $LAB_GROUP — readable only by lab members).
+Claude Code is preconfigured to use this key — no 'claude login' needed.
 ==============================================================
 MSG
