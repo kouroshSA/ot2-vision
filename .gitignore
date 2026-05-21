@@ -19,6 +19,10 @@ models/*.onnx
 # Data
 data/
 
+# Debug captures and annotated frames
+*.jpg
+*.png
+
 # IDE
 .vscode/
 .idea/

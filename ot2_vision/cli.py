@@ -304,5 +304,149 @@ def execute(protocol_file: str, host: str, port: int) -> None:
     console.print(f"Run ID: {result['run_id']}")
 
 
+@main.command(name="test-webcam")
+@click.option("--device", "-d", type=int, default=None, help="Video device index (e.g., 3 for /dev/video3)")
+@click.option("--width", type=int, default=1920, help="Capture width")
+@click.option("--height", type=int, default=1080, help="Capture height")
+@click.option("--save", type=click.Path(), default=None, help="Save a frame to this path and exit")
+def test_webcam(device: int | None, width: int, height: int, save: str | None) -> None:
+    """Test webcam capture (for Insta360 Link 2C or any USB camera)."""
+    import cv2
+
+    from .camera.webcam import WebcamCamera
+
+    config = get_config()
+    dev = device if device is not None else config.camera_device
+
+    console.print(f"[bold]Opening webcam at /dev/video{dev} ({width}x{height})...[/bold]")
+    cam = WebcamCamera(device_index=dev, width=width, height=height)
+    cam.start()
+
+    if save:
+        frame = cam.capture()
+        cv2.imwrite(save, frame)
+        console.print(f"[green]Saved frame to {save}[/green]")
+        cam.stop()
+        return
+
+    console.print("[green]Camera started. Press 'q' to quit, 's' to save a frame.[/green]")
+    try:
+        while True:
+            frame = cam.capture()
+            cv2.imshow("Webcam Test", frame)
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("q"):
+                break
+            elif key == ord("s"):
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                path = f"capture_{ts}.jpg"
+                cv2.imwrite(path, frame)
+                console.print(f"Saved: {path}")
+    finally:
+        cam.stop()
+        cv2.destroyAllWindows()
+
+
+@main.command()
+@click.option("--image", "-i", type=click.Path(exists=True), default=None, help="Image file to analyze (or capture live)")
+@click.option("--device", "-d", type=int, default=None, help="Camera device index")
+def analyze(image: str | None, device: int | None) -> None:
+    """Analyze the OT-2 deck using Claude Vision (identify labware and slots)."""
+    from .camera.webcam import WebcamCamera
+    from .vision.scene_analyzer import SceneAnalyzer
+
+    config = get_config()
+
+    if image:
+        console.print(f"[bold]Analyzing image: {image}[/bold]")
+        analyzer = SceneAnalyzer(api_key=config.anthropic_api_key)
+        analysis = analyzer.analyze_image_file(image)
+    else:
+        dev = device if device is not None else config.camera_device
+        console.print(f"[bold]Capturing from /dev/video{dev}...[/bold]")
+        cam = WebcamCamera(device_index=dev)
+        cam.start()
+        jpeg_bytes = cam.capture_jpeg()
+        cam.stop()
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        img_path = f"capture_{ts}.jpg"
+        Path(img_path).write_bytes(jpeg_bytes)
+        console.print(f"Saved capture to {img_path}")
+
+        analyzer = SceneAnalyzer(api_key=config.anthropic_api_key)
+        analysis = analyzer.analyze_image(jpeg_bytes)
+
+    console.print(Panel(json.dumps(analysis, indent=2), title="Scene Analysis (JSON)"))
+
+    scene_text = analyzer.build_scene_text(analysis)
+    console.print(Panel(scene_text, title="Scene Description"))
+
+
+@main.command(name="vision-run")
+@click.argument("instruction")
+@click.option("--execute/--no-execute", default=False, help="Execute on OT-2 (default: no)")
+@click.option("--image", "-i", type=click.Path(exists=True), default=None, help="Image file instead of live capture")
+@click.option("--device", "-d", type=int, default=None, help="Camera device index")
+@click.option("--output", "-o", type=click.Path(), default=None, help="Save protocol to this path")
+@click.option("--simulate/--no-simulate", default=False, help="Run opentrons_simulate after generation")
+def vision_run(instruction: str, execute: bool, image: str | None, device: int | None, output: str | None, simulate: bool) -> None:
+    """Full vision-language pipeline: capture → analyze → generate → [execute]."""
+    from .vision_pipeline import VisionLanguagePipeline
+
+    config = get_config()
+    dev = device if device is not None else config.camera_device
+
+    pipeline = VisionLanguagePipeline(camera_device=dev)
+    pipeline.initialize(skip_camera=image is not None, skip_ot2=not execute)
+
+    try:
+        console.print(f"[bold]Instruction:[/bold] {instruction}")
+        result = pipeline.run(instruction, execute=execute, save_path=output, image_path=image)
+
+        # Show analysis
+        analysis = result["analysis"]
+        console.print(f"\n[bold]Scene Analysis:[/bold] {len(analysis.get('labware', []))} labware items identified")
+        for item in analysis.get("labware", []):
+            console.print(f"  - Slot {item['slot']}: {item['type']} ({item['load_name']}) [{item.get('confidence', '?')}]")
+        if analysis.get("notes"):
+            console.print(f"  Notes: {analysis['notes']}")
+
+        console.print(Panel(result["scene_text"], title="Scene Description"))
+
+        # Show validation
+        v = result["validation"]
+        if v["valid"]:
+            console.print(f"\n[green]Validation: {v['message']}[/green]")
+        else:
+            console.print(f"\n[red]Validation: {v['message']}[/red]")
+
+        # Show protocol
+        console.print(Panel(Syntax(result["protocol_code"], "python", theme="monokai"), title="Generated Protocol"))
+        console.print(f"\nSaved to: {result['saved_to']}")
+        console.print(f"Captured image: {result.get('captured_image', 'N/A')}")
+
+        # Simulate
+        if simulate:
+            console.print("\nRunning opentrons_simulate...")
+            sim_ok, sim_output = ProtocolValidator.simulate(result["protocol_code"])
+            if sim_ok:
+                console.print(f"[green]Simulation passed[/green]")
+            else:
+                console.print(f"[red]Simulation failed:[/red]\n{sim_output}")
+
+        # Show execution status
+        if result["execution"]["status"] != "skipped":
+            exec_status = result["execution"]
+            if exec_status["status"] == "succeeded":
+                console.print(f"\n[green bold]Execution succeeded![/green bold]")
+            elif exec_status["status"] == "error":
+                console.print(f"\n[red]Execution error: {exec_status['message']}[/red]")
+            else:
+                console.print(f"\nExecution: {exec_status}")
+    finally:
+        pipeline.cleanup()
+
+
 if __name__ == "__main__":
     main()

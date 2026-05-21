@@ -12,12 +12,12 @@ from .scene_description import build_scene_description
 class ProtocolGenerator:
     """Generate OT-2 protocols using Claude API with visual scene context."""
 
-    def __init__(self, api_key: str | None = None, model: str = "claude-sonnet-4-5-20250929"):
+    def __init__(self, api_key: str | None = None, model: str | None = None):
         from anthropic import Anthropic
 
         config = get_config()
         self.client = Anthropic(api_key=api_key or config.anthropic_api_key)
-        self.model = model
+        self.model = model or config.anthropic_model_codegen
         self.max_tokens = 4096
         self.reference_docs = self._load_reference_docs()
 

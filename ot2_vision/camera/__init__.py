@@ -1,1 +1,1 @@
-"""Camera capture module for Intel RealSense D435i."""
+"""Camera capture module: RealSense D435i (RGB+depth) and generic webcam (RGB only)."""
