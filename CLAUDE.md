@@ -1,70 +1,46 @@
 # OT-2 Vision Automation — Project Instructions
 
+## Help command
+
+When the user types `help` (case-insensitive, possibly with punctuation
+like `help?` or `help me`), reply with the contents of
+[`HELP.md`](HELP.md) verbatim before doing anything else. This is the
+canonical onboarding entry point for new lab users.
+
 ## Pre-Run Safety Checks (MANDATORY)
 
-Before executing ANY protocol on the OT-2, perform these checks using both cameras:
+Before executing ANY protocol on the OT-2, run the full **preflight**
+procedure: [`procedures/preflight.md`](procedures/preflight.md). It
+composes four sub-checks:
 
-### 1. Lid Detection
+1. **Lid detection** — [`procedures/lid_detection.md`](procedures/lid_detection.md).
+   A pipette collision with a transparent lid will damage the instrument.
+   If any occupied slot in the protocol's path has `lid != "none"`,
+   STOP and warn the user.
+2. **Tip map** — [`procedures/tip_map.md`](procedures/tip_map.md).
+   Verify the specific well(s) the protocol will pick from actually
+   have tips. Output as an 8×12 ASCII grid for the user to confirm.
+3. **Deck state** — [`procedures/deck_state.md`](procedures/deck_state.md).
+   Verify physical labware in each slot matches what the protocol
+   `load_labware()` calls expect.
+4. **Pipette mount** — [`procedures/pipette_mount.md`](procedures/pipette_mount.md).
+   Verify the attached pipette matches the protocol's
+   `load_instrument()` request.
 
-Tip racks may have transparent lids that must be removed before pipetting. A collision between the pipette and a lid can damage the instrument.
-
-- **Capture images from both cameras** (top: `/dev/video3`, side: `/dev/video5`)
-- **Check every occupied slot** for the presence of a lid
-- A lid appears as a flat transparent surface covering the rack, with well impressions visible through it
-- If a lid is detected, **STOP and warn the user** before executing any protocol
-- Do NOT proceed with pipetting until the user confirms the lid has been removed
-
-### 2. Tip Map Generation
-
-Before any protocol that uses tips, generate a tip map to know which wells have tips and which are empty. This prevents the pipette from attempting to pick up from an empty position.
-
-**Procedure:**
-1. Capture from top camera (`/dev/video3`, 1920x1080) and side camera (`/dev/video5`, 1920x1080)
-2. Crop the tip rack region from the top view
-3. Calibrate a 12x8 grid using physical SBS rack dimensions:
-   - Well spacing: ~9mm (translates to ~25px at typical camera distance)
-   - Determine rack left edge from pixel intensity transition (deck gray ~55-70 to rack black ~4-6)
-   - Column 1 starts ~14.38mm (margin) from the rack left edge
-4. Use CLAHE equalization to handle uneven lighting across the rack
-5. Detect tips by reflection contrast: a tip has a bright rim (max pixel > 100) against the dark rack background, with high contrast (max - mean > 50)
-6. Cross-validate with side camera:
-   - Tips protrude as transparent funnel shapes above the rack surface
-   - Confirm the overall shape/extent of the tip block
-   - Rule out false positives at rack edges (edge reflections can mimic tips)
-7. Output the tip map as an 8x12 grid (rows A-H, columns 1-12) with X (tip present) and . (empty)
-
-**Output:** Always present the tip map as an ASCII grid so the user can quickly verify correct tip locations for the session:
-```
-     1   2   3   4   5   6   7   8   9  10  11  12
-  A  .   .   .   X   X   X   X   .   .   .   .   .
-  B  .   .   X   X   X   .   X   .   .   .   .   .
-  C  .   .   X   X   X   X   X   .   .   .   .   .
-  D  .   X   X   X   X   X   X   .   .   .   .   .
-  E  .   X   X   X   X   X   X   .   .   .   .   .
-  F  .   X   X   X   X   X   .   .   .   .   .   .
-  G  .   X   .   X   X   X   .   .   .   .   .   .
-  H  .   .   .   X   X   X   X   .   .   .   .   .
-  38 tips remaining / 58 empty
-```
-- `X` = tip present, `.` = empty
-- Include total tips remaining and empty count below the grid
-- Include per-column and per-row totals when useful
-- The user should visually confirm the map matches what they see on the deck before proceeding
-
-### 3. Deck State Verification
-
-Before running a protocol, verify the current deck state matches what the protocol expects:
-- Identify which slots have labware
-- Confirm labware types (tip rack, well plate, reservoir, etc.)
-- Check that required slots are not empty
-- Note any unexpected items on the deck
+The user may explicitly override an individual check ("I've checked
+the lids manually, skip that"). Always echo the override back before
+proceeding. Never silently skip a safety check.
 
 ## Camera Setup
 
 | Camera | Device | Position | Purpose |
 |--------|--------|----------|---------|
-| Insta360 Link 2C | `/dev/video3` | Top (overhead) | Deck overview, tip mapping, lid detection |
-| Insta360 Link 2C Pro | `/dev/video5` | Side (elevated) | Cross-validation, tip protrusion check, label reading |
+| Insta360 Link 2C | `/dev/video0` | Top (overhead) | Deck overview, tip mapping, lid detection |
+| Insta360 Link 2C Pro | `/dev/video2` | Side (elevated) | Cross-validation, tip protrusion check, label reading |
+
+`.env` has `CAMERA_DEVICE=0` and `SIDE_CAMERA_DEVICE=2`. USB
+re-enumeration after reboot can shift these — check `v4l2-ctl
+--list-devices` if capture fails.
 
 **Capture procedure:**
 ```python
@@ -78,10 +54,22 @@ ret, frame = cap.read()
 cap.release()
 ```
 
+## Models
+
+- `ANTHROPIC_MODEL_VISION` (Haiku 4.5) — fast vision/safety checks.
+  Known limitation: mis-identifies slot contents on overhead views.
+  Always have the user visually confirm before acting on the output.
+- `ANTHROPIC_MODEL_CODEGEN` (Sonnet 4.6) — protocol code generation.
+
+Both load from `/opt/ot2-vision/.env` (or `./.env`) via
+`ot2_vision.config`.
+
 ## Environment
 
 - Conda env: `lumi-opentron`
-- All Python scripts should be run via: `conda run -n lumi-opentron python3 -c "..."`
+- Run Python via: `conda run -n lumi-opentron --no-capture-output python3 ...`
+  (the `--no-capture-output` flag is required — without it, conda
+  buffers stdout and the output looks lost).
 
 ## OT-2 Deck Layout Reference
 
@@ -92,4 +80,13 @@ cap.release()
    1    2    3
 ```
 
-Slot numbering is embossed on the deck surface. When viewing from the top camera, slot 1 is bottom-left and slot 11 is top-center.
+Slot numbering is embossed on the deck surface. From the top camera,
+slot 1 is bottom-left and slot 11 is top-center.
+
+## Where things live
+
+- `primitives/` — curated reusable protocol templates (tracked)
+- `procedures/` — vision / safety / robot workflow playbooks (tracked)
+- `protocols/` — generated and one-off protocols (gitignored)
+- `instruction.md` — lab-user-facing setup + operation guide
+- `HELP.md` — quick-start shown when the user types `help`

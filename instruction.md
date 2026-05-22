@@ -45,9 +45,13 @@ share it securely; the user is forced to change it on first login.
    echo ${ANTHROPIC_API_KEY:0:12}         # should print: sk-ant-api03
    cd ~/ot2-vision && ls                  # symlink to /opt/ot2-vision
    ```
-4. **Read `~/ot2-vision/CLAUDE.md`** — it defines the mandatory pre-run
-   safety procedure (lid detection, tip map, deck verification). The
-   assistant follows this on every protocol run.
+4. **Type `help` in a Claude Code session** for a quick overview, or
+   read these in the repo directly:
+   - `CLAUDE.md` — mandatory pre-run safety doctrine (Claude reads
+     this automatically on every session start)
+   - `HELP.md` — quick-start and how to add primitives / procedures
+   - `primitives/README.md` — catalog of reusable protocol templates
+   - `procedures/README.md` — catalog of safety / vision workflows
 
 ---
 
@@ -113,6 +117,20 @@ After a run, your work directory will contain:
 | Any output Claude was asked to save | Run logs, notes, plots |
 
 These are yours — under your home dir, not shared with other lab members.
+
+### 2.5 Repo layout (where reusable things live)
+
+| Directory | Purpose | Tracked? |
+|-----------|---------|----------|
+| `primitives/` | Curated, reusable OT-2 protocol templates — start here when you want behavior similar to something already built | Yes |
+| `procedures/` | Vision / safety / robot workflow playbooks Claude executes (lid detection, tip map, deck state, preflight) | Yes |
+| `protocols/` | Your own scratch / generated protocols | No (gitignored) |
+| `scripts/` | Admin tooling (e.g. `add-lab-user.sh`) | Yes |
+
+When you build something reusable, promote it from `protocols/` into
+`primitives/` (for protocol code) or write a new playbook in
+`procedures/` (for a workflow), then commit and push. See the README
+in each directory for the exact format.
 
 ---
 
